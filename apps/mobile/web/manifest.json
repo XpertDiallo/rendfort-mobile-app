@@ -1,0 +1,9 @@
+{
+  "name": "RENDFORT Maths",
+  "short_name": "RENDFORT",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f5ef",
+  "theme_color": "#0f7c80",
+  "icons": []
+}
