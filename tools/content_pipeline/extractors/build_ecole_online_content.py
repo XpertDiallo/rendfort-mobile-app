@@ -158,8 +158,9 @@ def slugify(text: str) -> str:
 def clean_text(text: str) -> str:
     text = text.replace("\u00a0", " ")
     text = text.replace("𝜖", "∈")
+    text = unicodedata.normalize("NFKC", text)
     text = text.translate(SYMBOL_TRANSLATION)
-    text = re.sub(r"[\uf000-\uf8ff]", "", text)
+    text = normalize_math_notation(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"(?im)^\s*\d+\s*$", "", text)
@@ -167,6 +168,58 @@ def clean_text(text: str) -> str:
     text = re.sub(r"(?im)^\s*SECONDAIRE\s+2\s*C\s+MATHEMATIQUES\s*$", "", text)
     text = strip_boilerplate(text)
     return sanitize_app_terms(text.strip())
+
+
+def normalize_math_notation(text: str) -> str:
+    text = re.sub(r"[\u20d0-\u20ff]", "", text)
+    text = re.sub(r"[\u0302\u0305]", "", text)
+    text = re.sub(r"[\uf000-\uf8ff]", "", text)
+    text = text.translate(
+        str.maketrans(
+            {
+                "‖": "||",
+                "∗": "*",
+                "−": "-",
+                "𝜋": "π",
+                "∞": "inf",
+                "×": "x",
+                "≤": "<=",
+                "≥": ">=",
+                "⇔": "<=>",
+                "⟺": "<=>",
+                "⇒": "=>",
+                "⟹": "=>",
+                "∈": " appartient a ",
+                "⊂": " inclus dans ",
+                "ℕ": "N",
+                "ℤ": "Z",
+                "𝐷": "D",
+                "ℚ": "Q",
+                "ℝ": "R",
+            }
+        )
+    )
+    text = re.sub(
+        r"\|\|\s*([A-Za-z0-9])\s*\|\|",
+        lambda match: f"||{match.group(1)}||",
+        text,
+    )
+    text = re.sub(
+        r"\|\|\s*(-\s*[A-Za-z0-9])\s*\|\|",
+        lambda match: f"||{match.group(1).replace(' ', '')}||",
+        text,
+    )
+    text = re.sub(
+        r"\|\|\s*([A-Za-z0-9]\s*[+\-]\s*[A-Za-z0-9])\s*\|\|",
+        lambda match: f"||{re.sub(r'\\s+', ' ', match.group(1)).strip()}||",
+        text,
+    )
+    text = re.sub(r"([A-Za-z])\s+([A-Za-z])(?=\s*=)", r"\1\2", text)
+    text = re.sub(r"\s+([,.;:])", r"\1", text)
+    text = re.sub(r"(\d),\s+(\d)", r"\1,\2", text)
+    text = re.sub(r"([,;:])(?=\S)", r"\1 ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text
 
 
 def strip_boilerplate(text: str) -> str:
@@ -199,7 +252,7 @@ def tidy_body(text: str, limit: int = MAX_SECTION_CHARS) -> str:
     text = clean_text(text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     lines = [line.strip() for line in text.splitlines()]
-    text = "\n".join(line for line in lines if line)
+    text = "\n".join(line for line in lines if line and not is_diagram_noise(line))
     if len(text) <= limit:
         return text
     cut = text[:limit]
@@ -207,6 +260,15 @@ def tidy_body(text: str, limit: int = MAX_SECTION_CHARS) -> str:
     if sentence_stop > limit * 0.65:
         cut = cut[: sentence_stop + 1]
     return cut.rstrip() + "\n\nSuite disponible dans le support de cours."
+
+
+def is_diagram_noise(line: str) -> bool:
+    normalized = line.strip()
+    if normalized in {"▪", "●", "•"}:
+        return True
+    if re.fullmatch(r"[A-ZOu-vxyijIJ]{1,2}", normalized):
+        return True
+    return False
 
 
 def sanitize_app_terms(text: str) -> str:

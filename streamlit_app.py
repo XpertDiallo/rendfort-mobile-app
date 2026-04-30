@@ -12,7 +12,7 @@ DATA_PATH = Path("content/generated/seed/rendfort_content.json")
 
 
 @st.cache_data
-def load_content() -> dict[str, Any]:
+def load_content(content_mtime: float) -> dict[str, Any]:
     if not DATA_PATH.exists():
         st.error("Le fichier de contenu est introuvable.")
         st.stop()
@@ -484,7 +484,7 @@ def main() -> None:
     st.set_page_config(page_title="RENDFORT Maths", page_icon="R", layout="wide")
     inject_theme()
 
-    data = load_content()
+    data = load_content(DATA_PATH.stat().st_mtime)
     lessons = sorted(data.get("lessons", []), key=lambda item: item.get("order", 0))
 
     if not lessons:
