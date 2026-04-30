@@ -28,6 +28,15 @@ def lesson_minutes(lesson: dict[str, Any]) -> int:
     return max(8, round(duration / 60)) if duration > 90 else max(8, duration)
 
 
+def lesson_page_label(lesson: dict[str, Any]) -> str:
+    pages = lesson.get("source_pages") or {}
+    start = pages.get("start")
+    end = pages.get("end")
+    if not start or not end:
+        return ""
+    return f" - pages du support : {start}-{end}"
+
+
 def get_lesson_quiz(data: dict[str, Any], lesson: dict[str, Any]) -> dict[str, Any] | None:
     quiz_id = lesson.get("quiz_id")
     quizzes = data.get("quizzes", {})
@@ -244,10 +253,12 @@ def inject_theme() -> None:
             letter-spacing: 0;
         }
 
-        .section-card p {
+        .section-body {
             color: #2b3843;
             line-height: 1.65;
             margin: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
         }
 
         .quiz-wrap {
@@ -343,7 +354,7 @@ def render_lesson_intro(lesson: dict[str, Any]) -> None:
         <div class="panel">
             <div class="eyebrow">{clean(lesson.get("theme", "Theme"))}</div>
             <div class="lesson-title">{clean(lesson["title"])}</div>
-            <div class="muted">{clean(lesson.get("competence", ""))} - {lesson_minutes(lesson)} min</div>
+            <div class="muted">{clean(lesson.get("competence", ""))} - {lesson_minutes(lesson)} min{clean(lesson_page_label(lesson))}</div>
             <div class="progress-outer"><div class="progress-inner" style="width:{progress}%"></div></div>
             <div class="muted">Progression locale : {progress}%</div>
             <div class="chip-grid">{chips}</div>
@@ -391,7 +402,7 @@ def render_lesson(data: dict[str, Any], lesson: dict[str, Any]) -> None:
                 f"""
                 <div class="section-card">
                     <h3>{clean(section.get("title", "Section"))}</h3>
-                    <p>{clean(section.get("body", ""))}</p>
+                    <div class="section-body">{clean(section.get("body", ""))}</div>
                     {formula_html}
                 </div>
                 """,

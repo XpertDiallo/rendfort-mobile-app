@@ -14,6 +14,45 @@ SOURCE_PDF = Path(
     r"C:\Users\Lenovo\Desktop\Projets Applis\RENFO APP\cours maths apc 2nde C ecole-online ci.pdf"
 )
 OUTPUT = ROOT_DIR / "content" / "generated" / "seed" / "rendfort_content.json"
+MAX_SECTION_CHARS = 60000
+SYMBOL_TRANSLATION = str.maketrans(
+    {
+        "\uf02a": "*",
+        "\uf03c": "<",
+        "\uf044": "Δ",
+        "\uf047": "Γ",
+        "\uf05b": "[",
+        "\uf05d": "]",
+        "\uf065": "ε",
+        "\uf06c": "λ",
+        "\uf06d": "μ",
+        "\uf073": "σ",
+        "\uf07b": "{",
+        "\uf07d": "}",
+        "\uf0a3": "≤",
+        "\uf0a8": "•",
+        "\uf0b3": "≥",
+        "\uf0b4": "×",
+        "\uf0b9": "≠",
+        "\uf0c7": "∩",
+        "\uf0cc": "⊂",
+        "\uf0ce": "∈",
+        "\uf0db": "]",
+        "\uf0de": "⇒",
+        "\uf0e6": "(",
+        "\uf0e7": "",
+        "\uf0e8": ")",
+        "\uf0ec": "{",
+        "\uf0ed": "",
+        "\uf0ee": "}",
+        "\uf0f6": "(",
+        "\uf0f7": "",
+        "\uf0f8": ")",
+        "\uf0fc": "{",
+        "\uf0fd": "",
+        "\uf0fe": "}",
+    }
+)
 
 
 LESSON_STARTS = [
@@ -118,23 +157,56 @@ def slugify(text: str) -> str:
 
 def clean_text(text: str) -> str:
     text = text.replace("\u00a0", " ")
+    text = text.replace("𝜖", "∈")
+    text = text.translate(SYMBOL_TRANSLATION)
+    text = re.sub(r"[\uf000-\uf8ff]", "", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"(?im)^\s*\d+\s*$", "", text)
     text = re.sub(r"(?im)^\s*page\s+\d+\s+sur\s+\d+\s*$", "", text)
     text = re.sub(r"(?im)^\s*SECONDAIRE\s+2\s*C\s+MATHEMATIQUES\s*$", "", text)
+    text = strip_boilerplate(text)
     return sanitize_app_terms(text.strip())
 
 
-def compact_body(text: str, limit: int = 360) -> str:
-    text = re.sub(r"\s+", " ", text).strip()
+def strip_boilerplate(text: str) -> str:
+    ignored = [
+        r"^\s*MINIST[ÈE]RE DE L[’']EDUCATION\s*$",
+        r"^\s*NATIONALE ET DE\s*$",
+        r"^\s*L[’']ALPHABETISATION\s*$",
+        r"^\s*REPUBLIQUE DE COTE D[’']IVOIRE\s*$",
+        r"^\s*Union\s+[–-]\s+Discipline\s+[–-]\s+Travail\s*$",
+        r"^\s*MON ÉCOLE À LA MAISON\s*$",
+        r"^\s*CÔTE D[’']IVOIRE\s+[–-]\s+ÉCOLE NUMÉRIQUE\s*$",
+        r"^\s*SECONDAIRE\s*$",
+        r"^\s*2nde C\s*$",
+        r"^\s*MATH[ÉE]MATIQUES\s*$",
+        r"^\s*Code\s*:",
+    ]
+    cleaned_lines: list[str] = []
+    for line in text.splitlines():
+        normalized = line.strip()
+        if not normalized:
+            cleaned_lines.append("")
+            continue
+        if any(re.search(pattern, normalized, flags=re.I) for pattern in ignored):
+            continue
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines)
+
+
+def tidy_body(text: str, limit: int = MAX_SECTION_CHARS) -> str:
+    text = clean_text(text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    lines = [line.strip() for line in text.splitlines()]
+    text = "\n".join(line for line in lines if line)
     if len(text) <= limit:
         return text
     cut = text[:limit]
-    sentence_stop = max(cut.rfind(". "), cut.rfind(" ; "), cut.rfind(" : "))
-    if sentence_stop > 140:
+    sentence_stop = max(cut.rfind("\n"), cut.rfind(". "), cut.rfind(" ; "), cut.rfind(" : "))
+    if sentence_stop > limit * 0.65:
         cut = cut[: sentence_stop + 1]
-    return cut.rstrip() + " [...]"
+    return cut.rstrip() + "\n\nSuite disponible dans le support de cours."
 
 
 def sanitize_app_terms(text: str) -> str:
@@ -168,13 +240,65 @@ def split_sections(text: str) -> list[dict[str, str]]:
     hits.sort()
     sections: list[dict[str, str]] = []
     if not hits:
-        return [{"id": "cours", "title": "Cours", "body": text, "formula": ""}]
+        return [{"id": "cours", "title": "Cours", "body": tidy_body(text), "formula": extract_formula(text)}]
     for index, (start, title, content_start) in enumerate(hits):
         end = hits[index + 1][0] if index + 1 < len(hits) else len(text)
-        body = clean_text(text[content_start:end])
+        body = text[content_start:end]
+        if title == "Contenu de la lecon":
+            subsections = split_course_subsections(body)
+            if subsections:
+                sections.extend(subsections)
+                continue
+        body = tidy_body(body)
         if body:
             sections.append({"id": slugify(title), "title": title, "body": body, "formula": extract_formula(body)})
     return sections
+
+
+def split_course_subsections(text: str) -> list[dict[str, str]]:
+    text = clean_text(text)
+    markers = list(
+        re.finditer(
+            r"(?m)^\s*((?:I|V|X){1,5})\s*[.\-–]\s*([A-ZÉÈÀÙÂÊÎÔÛÇ0-9][^\n]{3,95})\s*$",
+            text,
+        )
+    )
+    if not markers:
+        return []
+
+    sections: list[dict[str, str]] = []
+    preface = tidy_body(text[: markers[0].start()])
+    if preface:
+        sections.append(
+            {
+                "id": "introduction-du-cours",
+                "title": "Introduction du cours",
+                "body": preface,
+                "formula": extract_formula(preface),
+            }
+        )
+
+    for index, match in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
+        title = sentence_title(match.group(2))
+        body = tidy_body(text[match.end() : end])
+        if body:
+            sections.append(
+                {
+                    "id": slugify(title),
+                    "title": title,
+                    "body": body,
+                    "formula": extract_formula(body),
+                }
+            )
+    return sections
+
+
+def sentence_title(text: str) -> str:
+    text = re.sub(r"\s+", " ", text).strip(" .:-")
+    if not text:
+        return "Cours"
+    return text[:1].upper() + text[1:].lower()
 
 
 def extract_formula(text: str) -> str:
@@ -267,14 +391,14 @@ def build_content() -> dict[str, Any]:
         raw = "\n".join(page_text[p] for p in range(start_page, end_page + 1))
         text = clean_text(raw)
         lesson_id = slugify(title)
-        sections = split_sections(text)
         sections = [
             {
                 **section,
-                "body": compact_body(section.get("body", "")),
-                "formula": compact_body(section.get("formula", ""), 180),
+                "body": tidy_body(section.get("body", "")),
+                "formula": tidy_body(section.get("formula", ""), 240),
             }
-            for section in sections[:4]
+            for section in split_sections(text)
+            if section.get("body")
         ]
         duration = extract_duration(raw, max(35, (end_page - start_page + 1) * 8))
         competence = "Mathematiques Seconde C"
@@ -288,7 +412,7 @@ def build_content() -> dict[str, Any]:
         lesson = {
             "id": lesson_id,
             "order": order,
-            "source": "ecole_online_ci",
+            "source": "support_cours",
             "source_pages": {"start": start_page, "end": end_page},
             "competence": competence,
             "theme": theme,
